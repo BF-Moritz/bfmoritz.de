@@ -1,0 +1,3 @@
+server:
+  port: 6969
+  webroot: "ui"
