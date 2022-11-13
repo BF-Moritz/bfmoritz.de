@@ -1,18 +1,25 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"server/router"
 	"server/types"
 	"server/vars"
+	"strconv"
 
+	"github.com/jmoiron/sqlx"
 	"github.com/spf13/viper"
 	"gopkg.in/alecthomas/kingpin.v2"
 
 	logLib "github.com/BF-Moritz/log.lib.go"
 	"github.com/BF-Moritz/log.lib.go/enum"
-	"github.com/BF-Moritz/log.lib.go/middleware"
+	logMiddleware "github.com/BF-Moritz/log.lib.go/middleware"
 	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v4/middleware"
+
+	"google.golang.org/api/option"
+	"google.golang.org/api/youtube/v3"
 )
 
 var (
@@ -51,13 +58,38 @@ func main() {
 		vars.Logger.LogFatal("main", "failed to unmarshal config (%s)", err)
 	}
 
+	vars.Config = config
+
+	// --- init YouTube
+
+	vars.YouTube, err = youtube.NewService(context.Background(), option.WithAPIKey(config.YouTube.ApiKey))
+	if err != nil {
+		vars.Logger.LogFatal("main", "failed to create youtube service")
+		return
+	}
+
+	// --- init sql
+
+	// TODO
+	vars.Conn, err = sqlx.Connect(
+		vars.Config.Sql.Driver,
+		vars.Config.Sql.User+":"+vars.Config.Sql.Password+"@tcp("+vars.Config.Sql.Host+":"+strconv.Itoa(vars.Config.Sql.Port)+")/"+vars.Config.Sql.Name+"?charset=utf8mb4&parseTime=true&columnsWithAlias=true",
+	)
+
 	// --- init echo
 
 	e := echo.New()
 	e.HideBanner = true
 	e.HidePort = true
 
-	e.Use(middleware.MakeEchoMiddleware(vars.Logger))
+	e.Use(logMiddleware.MakeEchoMiddleware(vars.Logger))
+
+	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
+		AllowOrigins: config.Server.Origins,
+		AllowHeaders: []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept},
+	}))
+
+	e.Pre(middleware.AddTrailingSlash())
 
 	router.MakeRoutes(e)
 
